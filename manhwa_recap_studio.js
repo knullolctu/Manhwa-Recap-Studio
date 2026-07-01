@@ -158,6 +158,32 @@ function extractDataUrlParts(dataUrl) {
     };
 }
 
+function extractGeminiText(result) {
+    const parts = result?.candidates?.[0]?.content?.parts || [];
+    return parts.map(part => part?.text || '').join('').trim();
+}
+
+function parseGeminiJsonResult(result) {
+    const rawText = extractGeminiText(result);
+    if (!rawText) {
+        throw new Error('Gemini returned an empty response');
+    }
+
+    const fencedMatch = rawText.match(/```(?:json)?\s*([\s\S]*?)```/i);
+    const candidateText = (fencedMatch?.[1] || rawText).trim();
+
+    try {
+        return JSON.parse(candidateText);
+    } catch (firstError) {
+        const start = candidateText.indexOf('{');
+        const end = candidateText.lastIndexOf('}');
+        if (start >= 0 && end > start) {
+            return JSON.parse(candidateText.slice(start, end + 1));
+        }
+        throw firstError;
+    }
+}
+
 async function generateAiCropSuggestionForScene(scene) {
     if (!appState.apiKey || !scene || !scene.assetId) return null;
 
@@ -213,8 +239,7 @@ async function generateAiCropSuggestionForScene(scene) {
         if (!response.ok) throw new Error('AI crop request failed');
 
         const result = await response.json();
-        const responseText = result.candidates?.[0]?.content?.parts?.[0]?.text;
-        const parsed = JSON.parse(responseText);
+    const parsed = parseGeminiJsonResult(result);
         const crop = parsed?.crop;
 
         if (!crop) return null;
@@ -1572,8 +1597,7 @@ async function triggerAiScriptGeneration() {
         const result = await response.json();
 
         // Parse returned JSON structure
-        const responseText = result.candidates?.[0]?.content?.parts?.[0]?.text;
-        const parsed = JSON.parse(responseText);
+        const parsed = parseGeminiJsonResult(result);
 
         if (parsed.scenes && parsed.scenes.length > 0) {
             // Flush existing scenes and populate
