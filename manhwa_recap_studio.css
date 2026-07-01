@@ -1,0 +1,22 @@
+/* Custom scrollbar for editing suite aesthetics */
+::-webkit-scrollbar {
+    width: 6px;
+    height: 6px;
+}
+
+::-webkit-scrollbar-track {
+    background: #13161c;
+}
+
+::-webkit-scrollbar-thumb {
+    background: #475362;
+    border-radius: 3px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+    background: #647180;
+}
+
+.canvas-container {
+    touch-action: none;
+}
