@@ -137,6 +137,7 @@ async function buildAutoVideo() {
     }
 
     syncScenesToMedia(true);
+    await refreshSceneCropsWithAi();
     renderTimeline();
     renderScriptList();
     renderCropStudio();
@@ -147,6 +148,102 @@ async function buildAutoVideo() {
 
     switchView('player');
     startPlayer();
+}
+
+function extractDataUrlParts(dataUrl) {
+    const commaIndex = dataUrl.indexOf(',');
+    return {
+        mimeType: dataUrl.slice(5, commaIndex),
+        base64: dataUrl.slice(commaIndex + 1)
+    };
+}
+
+async function generateAiCropSuggestionForScene(scene) {
+    if (!appState.apiKey || !scene || !scene.assetId) return null;
+
+    const asset = appState.assets.find(a => a.id === scene.assetId);
+    if (!asset || !asset.pages?.[scene.pageIndex]) return null;
+
+    const { mimeType, base64 } = extractDataUrlParts(asset.pages[scene.pageIndex]);
+    const promptText = `
+        You are framing a single manhwa recap shot for a vertical video edit.
+        Use the page image and the narration context to choose the most important panel region.
+        Narration context: "${scene.text}"
+
+        Return one tight normalized crop box in percentages with the best framing for this scene.
+        The crop must be within the page and should prefer a single panel or panel cluster that matches the narration.
+        If multiple choices exist, choose the strongest match.
+        Return only valid JSON.
+    `;
+
+    try {
+        const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-09-2025:generateContent?key=${appState.apiKey}`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                contents: [{
+                    parts: [
+                        { text: promptText },
+                        { inlineData: { mimeType, data: base64 } }
+                    ]
+                }],
+                generationConfig: {
+                    responseMimeType: 'application/json',
+                    responseSchema: {
+                        type: 'OBJECT',
+                        properties: {
+                            crop: {
+                                type: 'OBJECT',
+                                properties: {
+                                    x: { type: 'NUMBER' },
+                                    y: { type: 'NUMBER' },
+                                    w: { type: 'NUMBER' },
+                                    h: { type: 'NUMBER' },
+                                    label: { type: 'STRING' }
+                                },
+                                required: ['x', 'y', 'w', 'h']
+                            }
+                        },
+                        required: ['crop']
+                    }
+                }
+            })
+        });
+
+        if (!response.ok) throw new Error('AI crop request failed');
+
+        const result = await response.json();
+        const responseText = result.candidates?.[0]?.content?.parts?.[0]?.text;
+        const parsed = JSON.parse(responseText);
+        const crop = parsed?.crop;
+
+        if (!crop) return null;
+
+        return {
+            x: Math.max(0, Math.min(100, crop.x)),
+            y: Math.max(0, Math.min(100, crop.y)),
+            w: Math.max(1, Math.min(100, crop.w)),
+            h: Math.max(1, Math.min(100, crop.h)),
+            label: crop.label || 'Gemini crop'
+        };
+    } catch (err) {
+        console.error(err);
+        return null;
+    }
+}
+
+async function refreshSceneCropsWithAi() {
+    if (!appState.apiKey || appState.scenes.length === 0) return;
+
+    showToast("AI Cropping", "Analyzing scene frames with Gemini Vision...", "warning");
+
+    for (const scene of appState.scenes) {
+        const crop = await generateAiCropSuggestionForScene(scene);
+        if (crop) {
+            scene.crop = { x: crop.x, y: crop.y, w: crop.w, h: crop.h };
+            scene.panelSuggestion = crop.label ? `${scene.panelSuggestion} | AI: ${crop.label}` : scene.panelSuggestion;
+        }
+    }
 }
 
 // Toggle Api Key configuration display
@@ -476,13 +573,30 @@ function switchView(view) {
 
 // ----------------- AUTO-PANEL AUTOMATED CROPPING ENGINE -----------------
 // Highly-efficient Gutter-Detection visual algorithm to split manhwa panels
-function runAutoPanelDetection() {
+async function runAutoPanelDetection() {
     const asset = appState.assets.find(a => a.id === appState.selectedAssetId);
     if (!asset) return;
 
     const pageUrl = asset.pages[appState.selectedPageIndex];
     const sensitivity = parseInt(document.getElementById('detector-sensitivity').value);
     document.getElementById('sensitivity-val').textContent = `${sensitivity}%`;
+
+    const activeScene = appState.scenes.find(s => s.id === appState.selectedSceneId);
+    if (appState.apiKey && activeScene) {
+        const aiCrop = await generateAiCropSuggestionForScene(activeScene);
+        if (aiCrop) {
+            appState.detectedPanels = [
+                {
+                    x: aiCrop.x,
+                    y: aiCrop.y,
+                    w: aiCrop.w,
+                    h: aiCrop.h
+                }
+            ];
+            renderCropStudio();
+            return;
+        }
+    }
 
     const img = new Image();
     img.src = pageUrl;
@@ -1467,6 +1581,9 @@ async function triggerAiScriptGeneration() {
             parsed.scenes.forEach(s => {
                 addScene(s.text, s.duration, { crop: s.crop, panelSuggestion: s.panelSuggestion });
             });
+
+            syncScenesToMedia(true);
+            await refreshSceneCropsWithAi();
 
             showToast("Script Loaded", `Gemini successfully generated ${appState.scenes.length} recap segments.`, "success");
             renderScriptList();
