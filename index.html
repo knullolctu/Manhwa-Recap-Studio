@@ -1,26 +1,260 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="en" class="dark h-full">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <meta http-equiv="refresh" content="0; url=manhwa_recap_studio.html">
-    <title>Manhwa Recap Studio</title>
-    <style>
-        body {
-            margin: 0;
-            min-height: 100vh;
-            display: grid;
-            place-items: center;
-            background: #0b0d11;
-            color: #e5e7eb;
-            font-family: Arial, sans-serif;
+    <title>Manhwa Recap Studio Pro</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
+    <script src="https://unpkg.com/lucide@latest"></script>
+    <script>
+        tailwind.config = {
+            darkMode: 'class',
+            theme: {
+                extend: {
+                    colors: {
+                        studio: {
+                            50: '#f5f6f8',
+                            100: '#eaecef',
+                            200: '#cbd1d6',
+                            300: '#9ba4ae',
+                            400: '#647180',
+                            500: '#475362',
+                            600: '#3a4451',
+                            700: '#303743',
+                            800: '#1f242b',
+                            900: '#13161c',
+                            950: '#0b0d11',
+                        }
+                    }
+                }
+            }
         }
-        a {
-            color: #818cf8;
-        }
-    </style>
+    </script>
+    <link rel="stylesheet" href="manhwa_recap_studio.css">
 </head>
-<body>
-    <p>Redirecting to <a href="manhwa_recap_studio.html">Manhwa Recap Studio</a>...</p>
+<body class="bg-studio-950 text-slate-100 font-sans h-full flex flex-col overflow-hidden">
+    <header class="bg-studio-900 border-b border-studio-800 px-6 py-3 flex items-center justify-between z-10">
+        <div class="flex items-center space-x-3">
+            <div class="p-2 bg-indigo-600 rounded-lg shadow-lg shadow-indigo-500/20">
+                <i data-lucide="clapperboard" class="w-6 h-6 text-white"></i>
+            </div>
+            <div>
+                <h1 class="font-bold text-lg tracking-tight bg-gradient-to-r from-white to-slate-400 bg-clip-text text-transparent">Manhwa Recap Studio</h1>
+                <p class="text-xs text-slate-400">Automated panel cropping, script timeline & high-fidelity voice generator</p>
+            </div>
+        </div>
+
+        <div class="flex items-center space-x-3">
+            <div class="relative group">
+                <button onclick="toggleApiSettings()" class="flex items-center space-x-2 px-3 py-1.5 bg-studio-800 hover:bg-studio-700 text-xs font-semibold rounded-lg border border-studio-700 transition">
+                    <i data-lucide="key" class="w-3.5 h-3.5 text-yellow-500"></i>
+                    <span>Gemini API Key</span>
+                    <span id="api-indicator" class="w-2 h-2 rounded-full bg-red-500"></span>
+                </button>
+                <div id="api-dropdown" class="hidden absolute right-0 mt-2 w-80 bg-studio-800 rounded-xl shadow-xl border border-studio-700 p-4 z-50">
+                    <h3 class="text-sm font-semibold mb-2">Gemini API Key Settings</h3>
+                    <p class="text-xs text-slate-400 mb-3">Required for AI automated narration script generation and high-fidelity TTS voice synthesis.</p>
+                    <input type="password" id="gemini-api-key" placeholder="Enter Gemini API Key..." class="w-full bg-studio-900 border border-studio-700 rounded-lg px-3 py-2 text-xs text-slate-200 focus:outline-none focus:border-indigo-500 mb-2">
+                    <div class="flex justify-between items-center text-[10px] text-slate-400">
+                        <span>Stored locally in browser state</span>
+                        <button onclick="saveApiKey()" class="bg-indigo-600 hover:bg-indigo-500 text-white font-semibold px-3 py-1.5 rounded-md transition">Save Key</button>
+                    </div>
+                </div>
+            </div>
+
+            <button onclick="exportProject()" class="flex items-center space-x-1.5 px-3 py-1.5 bg-studio-800 hover:bg-studio-700 text-xs font-semibold rounded-lg border border-studio-700 transition">
+                <i data-lucide="download" class="w-3.5 h-3.5 text-slate-300"></i>
+                <span>Export Project</span>
+            </button>
+            <label class="flex items-center space-x-1.5 px-3 py-1.5 bg-studio-800 hover:bg-studio-700 text-xs font-semibold rounded-lg border border-studio-700 cursor-pointer transition">
+                <i data-lucide="upload" class="w-3.5 h-3.5 text-slate-300"></i>
+                <span>Import Project</span>
+                <input type="file" id="import-project-file" class="hidden" accept=".json" onchange="importProject(event)">
+            </label>
+        </div>
+    </header>
+
+    <main class="flex-1 flex overflow-hidden">
+        <section class="w-80 bg-studio-900 border-r border-studio-800 flex flex-col overflow-hidden">
+            <div class="p-4 border-b border-studio-800">
+                <h2 class="text-xs font-bold text-slate-400 uppercase tracking-wider mb-3">Manhwa Page Assets</h2>
+                <div id="dropzone" onclick="document.getElementById('manhwa-files').click()" class="border-2 border-dashed border-studio-700 hover:border-indigo-500 rounded-xl p-4 text-center cursor-pointer transition flex flex-col items-center justify-center bg-studio-950/50">
+                    <i data-lucide="file-up" class="w-8 h-8 text-indigo-400 mb-2 animate-pulse"></i>
+                    <p class="text-xs font-medium text-slate-200">Upload PDF, CBZ or Images</p>
+                    <p class="text-[10px] text-slate-500 mt-1">Drag files here or click to browse</p>
+                    <input type="file" id="manhwa-files" class="hidden" accept=".pdf,.cbz,.zip,.png,.jpg,.jpeg,.webp" multiple onchange="handleFileSelect(event)">
+                </div>
+            </div>
+            <div class="flex-1 overflow-y-auto p-3 space-y-2" id="asset-list-container"></div>
+        </section>
+
+        <section class="flex-1 bg-studio-950 flex flex-col overflow-hidden border-r border-studio-800 relative">
+            <div class="bg-studio-900 border-b border-studio-800 px-4 py-2 flex items-center justify-between">
+                <div class="flex space-x-1 bg-studio-950 p-1 rounded-lg border border-studio-800">
+                    <button onclick="switchView('crop')" id="tab-btn-crop" class="px-3 py-1.5 text-xs font-medium rounded-md transition bg-indigo-600 text-white shadow-md">
+                        <span class="flex items-center space-x-1.5"><i data-lucide="crop" class="w-3.5 h-3.5"></i><span>Smart Crop Studio</span></span>
+                    </button>
+                    <button onclick="switchView('player')" id="tab-btn-player" class="px-3 py-1.5 text-xs font-medium rounded-md transition text-slate-400 hover:text-white">
+                        <span class="flex items-center space-x-1.5"><i data-lucide="play" class="w-3.5 h-3.5"></i><span>Cinematic Player Preview</span></span>
+                    </button>
+                </div>
+                <div class="flex items-center space-x-4">
+                    <div id="panel-detector-controls" class="flex items-center space-x-2 text-xs">
+                        <span class="text-slate-400 font-medium">Auto-Detect Gutter Sensitivity:</span>
+                        <input type="range" id="detector-sensitivity" min="5" max="95" value="40" class="w-24 h-1 bg-studio-700 rounded-lg appearance-none cursor-pointer accent-indigo-500" onchange="runAutoPanelDetection()">
+                        <span id="sensitivity-val" class="text-indigo-400 font-mono">40%</span>
+                        <button onclick="runAutoPanelDetection()" class="ml-2 flex items-center space-x-1 bg-indigo-600/20 hover:bg-indigo-600/30 text-indigo-400 border border-indigo-500/30 px-2 py-1 rounded transition">
+                            <i data-lucide="wand-2" class="w-3 h-3"></i>
+                            <span>Detect Panels</span>
+                        </button>
+                    </div>
+                </div>
+            </div>
+
+            <div class="flex-1 relative overflow-hidden flex items-center justify-center p-6 bg-studio-950/80">
+                <div id="view-crop" class="w-full h-full flex flex-col items-center justify-center">
+                    <div class="relative max-w-full max-h-[85%] border border-studio-800 rounded-xl overflow-hidden bg-studio-900/50 flex items-center justify-center select-none shadow-2xl">
+                        <canvas id="crop-canvas" class="max-w-full max-h-full block object-contain"></canvas>
+                        <div id="crop-interaction-overlay" class="absolute inset-0 pointer-events-auto"></div>
+                        <div id="crop-empty-state" class="absolute inset-0 flex flex-col items-center justify-center bg-studio-900 p-6 text-center">
+                            <i data-lucide="image" class="w-16 h-16 text-studio-700 mb-3 animate-pulse"></i>
+                            <h3 class="text-lg font-bold text-slate-300">No Page Selected</h3>
+                            <p class="text-xs text-slate-500 max-w-sm mt-1">Choose an uploaded manhwa page from the sidebar to slice panels, or upload new files to start your recap pipeline.</p>
+                        </div>
+                    </div>
+                    <div id="crop-toolbar" class="mt-4 flex items-center justify-between w-full max-w-3xl px-4 py-2 bg-studio-900 border border-studio-800 rounded-xl text-xs text-slate-400">
+                        <span class="flex items-center space-x-2"><span class="w-2 h-2 rounded-full bg-indigo-500 animate-ping"></span><span><strong>PRO TIP:</strong> Click any <b class="text-indigo-400">Green Bounding Box</b> on the canvas to auto-fit crop to that panel! Or drag a custom box.</span></span>
+                        <div class="flex items-center space-x-2">
+                            <button onclick="resetCrop()" class="px-2.5 py-1 hover:bg-studio-800 rounded border border-studio-700 text-slate-300">Reset Crop</button>
+                            <button onclick="applyCropToSelectedScene()" class="px-3 py-1 bg-indigo-600 hover:bg-indigo-500 rounded text-white font-medium">Apply to Scene</button>
+                        </div>
+                    </div>
+                </div>
+
+                <div id="view-player" class="hidden w-full h-full flex flex-col items-center justify-center">
+                    <div class="relative aspect-video w-full max-w-3xl border border-studio-800 rounded-xl overflow-hidden bg-black shadow-2xl flex flex-col items-center justify-center">
+                        <canvas id="player-canvas" class="w-full h-full bg-neutral-950"></canvas>
+                        <div class="absolute bottom-8 left-10 right-10 text-center pointer-events-none">
+                            <span id="subtitle-box" class="px-4 py-2 bg-black/80 backdrop-blur-sm border border-neutral-800 rounded-lg text-sm text-yellow-400 shadow-md font-medium tracking-wide leading-relaxed inline-block max-w-full break-words opacity-0 transition-opacity duration-200">Narrative audio text here</span>
+                        </div>
+                        <div id="player-status-overlay" class="absolute top-4 left-4 flex items-center space-x-2 bg-studio-900/90 backdrop-blur px-3 py-1.5 rounded-lg border border-studio-800 text-xs">
+                            <span class="w-2 h-2 rounded-full bg-red-600 animate-pulse"></span>
+                            <span class="font-bold tracking-wider uppercase text-[10px] text-slate-300">Live Preview Engine</span>
+                        </div>
+                    </div>
+                    <div class="mt-4 flex items-center justify-between w-full max-w-3xl px-6 py-3 bg-studio-900 border border-studio-800 rounded-xl">
+                        <div class="flex items-center space-x-4">
+                            <button id="player-play-btn" onclick="togglePlayerPlayback()" class="p-3 bg-indigo-600 hover:bg-indigo-500 rounded-full text-white shadow-lg transition"><i data-lucide="play" class="w-5 h-5 fill-current"></i></button>
+                            <div>
+                                <div id="player-time-display" class="text-sm font-semibold tracking-wider font-mono">00:00 / 00:00</div>
+                                <div class="text-[10px] text-slate-500">Auto pan-and-zoom motion enabled</div>
+                            </div>
+                        </div>
+                        <div class="flex-1 mx-6 h-1 bg-studio-800 rounded-full cursor-pointer relative" id="player-scrub-bar" onclick="scrubPlayer(event)"><div id="player-progress-fill" class="h-full bg-indigo-500 rounded-full w-0"></div></div>
+                        <div class="flex items-center space-x-3 text-xs">
+                            <span class="text-slate-500">Zoom Motion:</span>
+                            <select id="player-motion-style" class="bg-studio-950 border border-studio-800 rounded px-2 py-1 text-slate-300 focus:outline-none">
+                                <option value="subtle-zoom">Subtle Ken Burns</option>
+                                <option value="pan-down">Slow Downward Pan</option>
+                                <option value="pan-up">Slow Upward Pan</option>
+                                <option value="static">Static Close-up</option>
+                            </select>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="h-64 bg-studio-900 border-t border-studio-800 flex flex-col overflow-hidden">
+                <div class="px-4 py-2 bg-studio-950 border-b border-studio-800 flex items-center justify-between">
+                    <div class="flex items-center space-x-3"><span class="text-xs font-bold tracking-wider text-slate-400 uppercase">Recap Timeline Track</span><span id="timeline-scene-count" class="text-[10px] bg-studio-800 text-slate-300 px-2 py-0.5 rounded-full font-semibold border border-studio-700">0 Clips</span></div>
+                    <div class="flex items-center space-x-2">
+                        <button onclick="addScene()" class="flex items-center space-x-1.5 px-3 py-1 bg-indigo-600/10 hover:bg-indigo-600/20 text-indigo-400 border border-indigo-500/20 rounded-md text-xs font-medium transition"><i data-lucide="plus" class="w-3.5 h-3.5"></i><span>Add Scene Clip</span></button>
+                    </div>
+                </div>
+                <div class="flex-1 overflow-x-auto overflow-y-hidden flex items-stretch p-4 space-x-3 bg-studio-950/40 relative" id="timeline-track-container">
+                    <div id="timeline-empty-message" class="absolute inset-0 flex flex-col items-center justify-center text-slate-500 text-xs"><i data-lucide="film" class="w-8 h-8 mb-1.5 text-studio-800"></i>No clips created. Fill out the narration script on the right to start editing.</div>
+                </div>
+            </div>
+        </section>
+
+        <section class="w-96 bg-studio-900 flex flex-col overflow-hidden">
+            <div class="p-4 border-b border-studio-800 space-y-3">
+                <div class="flex items-center justify-between"><h2 class="text-xs font-bold text-slate-400 uppercase tracking-wider">Recap Script Narrator</h2><span class="text-[10px] bg-indigo-600/20 text-indigo-400 border border-indigo-500/30 px-2 py-0.5 rounded-full font-semibold">Gemini API Supported</span></div>
+                <button onclick="openAiPromptModal()" class="w-full flex items-center justify-center space-x-2 py-2 bg-gradient-to-r from-indigo-600 to-violet-600 hover:from-indigo-500 hover:to-violet-500 text-white font-semibold text-xs rounded-xl shadow-lg transition transform hover:-translate-y-0.5"><i data-lucide="sparkles" class="w-4 h-4 text-yellow-300"></i><span>AI Generate Recap Script with Gemini</span></button>
+            </div>
+
+            <div class="p-3 bg-studio-950 border-b border-studio-800 grid grid-cols-2 gap-2 text-xs">
+                <div>
+                    <label class="block text-slate-500 text-[10px] uppercase font-bold mb-1">Narration Voice</label>
+                    <select id="narration-voice-select" class="w-full bg-studio-900 border border-studio-800 text-slate-300 rounded px-2 py-1.5 focus:outline-none focus:border-indigo-500">
+                        <optgroup label="Gemini High-Fi Voices (Requires Key)"><option value="Zephyr" selected>Zephyr (Rich & Warm)</option><option value="Puck">Puck (Fast, energetic)</option><option value="Charon">Charon (Deep, cinematic)</option><option value="Kore">Kore (Clear, narration)</option><option value="Fenrir">Fenrir (Deep mystery)</option><option value="Leda">Leda (Calm, engaging)</option></optgroup>
+                        <optgroup label="System Speech Fallbacks" id="local-voice-optgroup"></optgroup>
+                    </select>
+                </div>
+                <div>
+                    <label class="block text-slate-500 text-[10px] uppercase font-bold mb-1">Narrator Speed</label>
+                    <select id="narrator-speed" class="w-full bg-studio-900 border border-studio-800 text-slate-300 rounded px-2 py-1.5 focus:outline-none focus:border-indigo-500"><option value="0.85">0.85x (Slow pacing)</option><option value="1.0" selected>1.0x (Standard)</option><option value="1.1">1.1x (TikTok speed)</option><option value="1.2">1.2x (Fast & Intense)</option></select>
+                </div>
+            </div>
+
+            <div class="p-4 border-b border-studio-800 space-y-3 bg-studio-950/70 text-xs">
+                <div class="flex items-center justify-between">
+                    <span class="text-[10px] font-bold uppercase tracking-wider text-slate-400">Video Automation</span>
+                    <button onclick="buildAutoVideo()" class="px-3 py-1.5 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white text-[10px] font-bold">Auto Build Video</button>
+                </div>
+
+                <div class="grid grid-cols-2 gap-2">
+                    <div>
+                        <label class="block text-[10px] uppercase font-bold text-slate-500 mb-1">Background Mode</label>
+                        <select id="scene-bg-mode" onchange="applyPresentationSettings()" class="w-full bg-studio-900 border border-studio-800 text-slate-300 rounded px-2 py-1.5 focus:outline-none focus:border-indigo-500">
+                            <option value="solid">Solid Color</option>
+                            <option value="blur">Blurred Panel</option>
+                        </select>
+                    </div>
+                    <div>
+                        <label class="block text-[10px] uppercase font-bold text-slate-500 mb-1">Solid Color</label>
+                        <input id="scene-bg-color" type="color" value="#0b0d11" onchange="applyPresentationSettings()" class="w-full h-9 bg-studio-900 border border-studio-800 rounded px-1 py-1.5">
+                    </div>
+                </div>
+
+                <div>
+                    <label class="block text-[10px] uppercase font-bold text-slate-500 mb-2">Random Motion Pool</label>
+                    <div class="grid grid-cols-3 gap-2 text-[10px] text-slate-300">
+                        <label class="flex items-center space-x-2 bg-studio-900 border border-studio-800 rounded-lg px-2 py-2"><input id="animation-slide-up" type="checkbox" checked onchange="syncScenesToMedia(true)"><span>Slide Up</span></label>
+                        <label class="flex items-center space-x-2 bg-studio-900 border border-studio-800 rounded-lg px-2 py-2"><input id="animation-slide-down" type="checkbox" checked onchange="syncScenesToMedia(true)"><span>Slide Down</span></label>
+                        <label class="flex items-center space-x-2 bg-studio-900 border border-studio-800 rounded-lg px-2 py-2"><input id="animation-zoom" type="checkbox" checked onchange="syncScenesToMedia(true)"><span>Zoom</span></label>
+                    </div>
+                </div>
+            </div>
+
+            <div class="flex-1 overflow-y-auto p-4 space-y-4" id="script-list-container"></div>
+            <div class="p-4 bg-studio-950 border-t border-studio-800 flex justify-between items-center text-xs">
+                <span id="script-stats-text" class="text-slate-500">Total script: 0 words | 0s</span>
+                <button onclick="generateAllTts()" class="flex items-center space-x-1.5 px-3 py-1.5 bg-studio-800 hover:bg-studio-700 text-slate-300 rounded-lg border border-studio-700 font-medium transition"><i data-lucide="volume-2" class="w-3.5 h-3.5 text-indigo-400"></i><span>Generate All Audio</span></button>
+            </div>
+        </section>
+    </main>
+
+    <div id="ai-prompt-modal" class="hidden fixed inset-0 z-50 bg-black/75 backdrop-blur-sm flex items-center justify-center p-4">
+        <div class="bg-studio-800 rounded-2xl max-w-lg w-full p-6 border border-studio-700 shadow-2xl relative">
+            <button onclick="closeAiPromptModal()" class="absolute top-4 right-4 text-slate-400 hover:text-white transition"><i data-lucide="x" class="w-5 h-5"></i></button>
+            <div class="flex items-center space-x-3 mb-4"><div class="p-2 bg-gradient-to-r from-indigo-500 to-purple-500 rounded-lg text-white"><i data-lucide="sparkles" class="w-5 h-5"></i></div><div><h3 class="font-bold text-lg text-white">AI Recap Script Generator</h3><p class="text-xs text-slate-400">Write an automatically timed narrative script using Gemini AI</p></div></div>
+            <div class="space-y-4">
+                <div><label class="block text-xs font-semibold text-slate-300 mb-1">Recap Title / Topic</label><input type="text" id="ai-recap-title" placeholder="e.g., Solo Leveling Chapter 1 - The Weakest Hunter" class="w-full bg-studio-900 border border-studio-700 rounded-lg px-3 py-2 text-sm text-slate-200 focus:outline-none focus:border-indigo-500"></div>
+                <div><label class="block text-xs font-semibold text-slate-300 mb-1">Plot Details / Summary Prompt</label><textarea id="ai-recap-prompt" rows="5" placeholder="Enter details about what happened in the chapters, key characters to mention, pacing speed, or comedic/hype commentary tone..." class="w-full bg-studio-900 border border-studio-700 rounded-lg p-3 text-xs text-slate-200 focus:outline-none focus:border-indigo-500"></textarea></div>
+                <div class="p-3 bg-studio-900/60 rounded-xl border border-studio-700/50 text-xs text-slate-400 space-y-2"><p class="font-medium text-slate-300">How this works:</p><p>Gemini will parse your recap plot and design <b>perfect chronological narration clips</b>. It automatically assigns mock estimated timing offsets, subtitles, and detailed descriptions of which panel visual to look out for.</p></div>
+                <div class="flex justify-end space-x-2 pt-2"><button onclick="closeAiPromptModal()" class="px-4 py-2 bg-studio-700 hover:bg-studio-600 rounded-lg text-xs font-semibold text-slate-300 transition">Cancel</button><button onclick="triggerAiScriptGeneration()" class="px-4 py-2 bg-indigo-600 hover:bg-indigo-500 rounded-lg text-xs font-bold text-white shadow-lg transition flex items-center space-x-1.5"><i data-lucide="wand-2" class="w-3.5 h-3.5"></i><span>Generate Script</span></button></div>
+            </div>
+        </div>
+    </div>
+
+    <div id="toast" class="fixed bottom-6 right-6 z-50 transform translate-y-20 opacity-0 transition-all duration-300 ease-out flex items-center space-x-3 bg-studio-800 border border-studio-700 px-4 py-3 rounded-xl shadow-2xl max-w-sm pointer-events-none">
+        <div id="toast-icon-container" class="p-1 rounded-lg"></div>
+        <div><h4 id="toast-title" class="text-xs font-bold text-white">Success</h4><p id="toast-message" class="text-[10px] text-slate-400 mt-0.5">Details goes here.</p></div>
+    </div>
+
+    <script src="manhwa_recap_studio.js" defer></script>
 </body>
 </html>

@@ -75,6 +75,80 @@ window.addEventListener('load', () => {
     });
 });
 
+function getEnabledAnimationStyles() {
+    const styles = [];
+    if (document.getElementById('animation-slide-up')?.checked) styles.push('slide-up');
+    if (document.getElementById('animation-slide-down')?.checked) styles.push('slide-down');
+    if (document.getElementById('animation-zoom')?.checked) styles.push('zoom');
+    return styles.length ? styles : ['zoom'];
+}
+
+function getMediaSequence() {
+    return appState.assets.flatMap(asset => asset.pages.map((pageUrl, pageIndex) => ({
+        assetId: asset.id,
+        pageIndex,
+        pageUrl
+    })));
+}
+
+function assignScenePresentation(scene, index = 0, forceRandomize = false) {
+    const enabledStyles = getEnabledAnimationStyles();
+    const selectedBgMode = document.getElementById('scene-bg-mode')?.value || appState.backgroundMode;
+    const selectedBgColor = document.getElementById('scene-bg-color')?.value || appState.backgroundColor;
+
+    if (forceRandomize || !scene.animationStyle || !enabledStyles.includes(scene.animationStyle)) {
+           scene.animationStyle = enabledStyles[Math.floor(Math.random() * enabledStyles.length)] || enabledStyles[0];
+    }
+
+    scene.backgroundMode = selectedBgMode || 'solid';
+    scene.backgroundColor = selectedBgColor || '#0b0d11';
+}
+
+function syncScenesToMedia(forceRandomize = false) {
+    const mediaSequence = getMediaSequence();
+
+    appState.scenes.forEach((scene, index) => {
+        const media = mediaSequence.length ? mediaSequence[index % mediaSequence.length] : null;
+        if (media) {
+            scene.assetId = media.assetId;
+            scene.pageIndex = media.pageIndex;
+        } else if (!scene.assetId && appState.selectedAssetId) {
+            scene.assetId = appState.selectedAssetId;
+            scene.pageIndex = appState.selectedPageIndex || 0;
+        }
+
+        assignScenePresentation(scene, index, forceRandomize);
+    });
+}
+
+function applyPresentationSettings() {
+    appState.backgroundMode = document.getElementById('scene-bg-mode').value;
+    appState.backgroundColor = document.getElementById('scene-bg-color').value;
+    syncScenesToMedia(false);
+    renderTimeline();
+    renderScriptList();
+    renderCropStudio();
+}
+
+async function buildAutoVideo() {
+    if (appState.scenes.length === 0) {
+        showToast("No Scenes", "Create or generate at least one scene first.", "error");
+        return;
+    }
+
+    syncScenesToMedia(true);
+    renderTimeline();
+    renderScriptList();
+    renderCropStudio();
+
+    if (appState.apiKey) {
+        await generateAllTts();
+    }
+
+    switchView('player');
+    startPlayer();
+}
+
 // Toggle Api Key configuration display
 function toggleApiSettings() {
     const dropdown = document.getElementById('api-dropdown');
@@ -149,6 +223,7 @@ function populateSystemSpeechVoices() {
 function handleFileSelect(event) {
     if (event.target.files.length) {
         processUploadedFiles(event.target.files);
+        event.target.value = '';
     }
 }
 
@@ -171,6 +246,12 @@ async function processUploadedFiles(files) {
         }
     }
     renderAssetList();
+    syncScenesToMedia(false);
+    if (appState.scenes.length > 0) {
+        renderTimeline();
+        renderScriptList();
+        renderCropStudio();
+    }
 }
 
 // Parse single direct images
@@ -718,17 +799,23 @@ function addScene(text = "Enter voiceover narration here...", duration = 5, cust
         startTime = last.startTime + last.duration;
     }
 
+    const mediaSequence = getMediaSequence();
+    const media = mediaSequence[appState.scenes.length] || null;
+
     const newScene = {
         id: id,
         text: text,
         duration: duration,
         startTime: startTime,
-        assetId: appState.selectedAssetId || (appState.assets[0]?.id || null),
-        pageIndex: appState.selectedPageIndex || 0,
+        assetId: customFields.assetId || media?.assetId || appState.selectedAssetId || (appState.assets[0]?.id || null),
+        pageIndex: customFields.pageIndex ?? media?.pageIndex ?? appState.selectedPageIndex ?? 0,
         crop: customFields.crop || { x: 10, y: 15, w: 80, h: 50 },
         panelSuggestion: customFields.panelSuggestion || "A close-up view showing the characters action detail.",
         audioUrl: null,
-        status: 'pending'
+        status: 'pending',
+        animationStyle: customFields.animationStyle || null,
+        backgroundMode: customFields.backgroundMode || null,
+        backgroundColor: customFields.backgroundColor || null
     };
 
     appState.scenes.push(newScene);
@@ -742,6 +829,8 @@ function addScene(text = "Enter voiceover narration here...", duration = 5, cust
     if (newScene.assetId) {
         selectAsset(newScene.assetId, newScene.pageIndex);
     }
+
+    syncScenesToMedia(false);
 }
 
 // Delete visual segment from tracks
@@ -914,7 +1003,13 @@ function renderScriptList() {
                 <!-- Visual Panel Recommendation / Helper details -->
                 <div class="text-[10px] bg-studio-950/40 border border-studio-800 p-2 rounded-lg flex items-start space-x-1.5">
                     <i data-lucide="sparkles" class="w-3.5 h-3.5 text-indigo-400 shrink-0 mt-0.5"></i>
-                    <p class="text-slate-400 leading-relaxed italic"><strong>Visual suggestion:</strong> ${scene.panelSuggestion}</p>
+                    <div class="w-full space-y-1">
+                        <p class="text-slate-400 leading-relaxed italic"><strong>Visual suggestion:</strong> ${scene.panelSuggestion}</p>
+                        <div class="flex items-center justify-between gap-2 text-[9px] text-slate-500">
+                            <span>Motion: ${scene.animationStyle || 'zoom'}</span>
+                            <span>BG: ${scene.backgroundMode || 'solid'}</span>
+                        </div>
+                    </div>
                 </div>
             </div>
         `;
@@ -1148,21 +1243,33 @@ function renderActivePlayerFrame() {
     triggerSpeechSegment(activeScene);
 
     if (img.complete) {
-        ctx.fillStyle = '#000';
-        ctx.fillRect(0, 0, w, h);
-
-        // Calculations mapping crop boundaries to standard output
         const crop = activeScene.crop;
         const cropX = (crop.x / 100) * img.width;
         const cropY = (crop.y / 100) * img.height;
         const cropW = (crop.w / 100) * img.width;
         const cropH = (crop.h / 100) * img.height;
 
+        const backgroundMode = activeScene.backgroundMode || appState.backgroundMode || 'solid';
+        const backgroundColor = activeScene.backgroundColor || appState.backgroundColor || '#0b0d11';
+
+        if (backgroundMode === 'blur') {
+            ctx.save();
+            ctx.filter = 'blur(28px) brightness(0.72) saturate(1.08)';
+            ctx.drawImage(img, cropX, cropY, cropW, cropH, 0, 0, w, h);
+            ctx.restore();
+        } else {
+            ctx.fillStyle = backgroundColor;
+            ctx.fillRect(0, 0, w, h);
+        }
+
+        ctx.fillStyle = 'rgba(0, 0, 0, 0.14)';
+        ctx.fillRect(0, 0, w, h);
+
         // Calculate camera animation progress inside active scene (0.0 to 1.0)
         const sceneProgress = (appState.playbackTime - activeScene.startTime) / activeScene.duration;
 
         // Select and apply zoom/pan kinetics
-        const motionStyle = document.getElementById('player-motion-style').value;
+        const motionStyle = activeScene.animationStyle || document.getElementById('player-motion-style').value;
         let animatedCropX = cropX;
         let animatedCropY = cropY;
         let animatedCropW = cropW;
@@ -1176,6 +1283,20 @@ function renderActivePlayerFrame() {
             // Keep center aligned
             animatedCropX = cropX + (cropW - animatedCropW) / 2;
             animatedCropY = cropY + (cropH - animatedCropH) / 2;
+        } else if (motionStyle === 'slide-down') {
+            const slideOffset = -18 + (sceneProgress * 18);
+            ctx.save();
+            ctx.translate(0, slideOffset);
+            ctx.drawImage(img, animatedCropX, animatedCropY, animatedCropW, animatedCropH, 0, 0, w, h);
+            ctx.restore();
+            return;
+        } else if (motionStyle === 'slide-up') {
+            const slideOffset = 18 - (sceneProgress * 18);
+            ctx.save();
+            ctx.translate(0, slideOffset);
+            ctx.drawImage(img, animatedCropX, animatedCropY, animatedCropW, animatedCropH, 0, 0, w, h);
+            ctx.restore();
+            return;
         } else if (motionStyle === 'pan-down') {
             // Pan down slightly over time
             const maxPan = cropH * 0.1; // 10% height shift
@@ -1489,11 +1610,17 @@ function exportProject() {
             duration: s.duration,
             crop: s.crop,
             panelSuggestion: s.panelSuggestion,
-            pageIndex: s.pageIndex
+            pageIndex: s.pageIndex,
+            animationStyle: s.animationStyle,
+            backgroundMode: s.backgroundMode,
+            backgroundColor: s.backgroundColor
         })),
         motionStyle: document.getElementById('player-motion-style').value,
         voice: document.getElementById('narration-voice-select').value,
-        speed: document.getElementById('narrator-speed').value
+        speed: document.getElementById('narrator-speed').value,
+        backgroundMode: document.getElementById('scene-bg-mode')?.value || appState.backgroundMode,
+        backgroundColor: document.getElementById('scene-bg-color')?.value || appState.backgroundColor,
+        animationPool: getEnabledAnimationStyles()
     };
 
     const dataStr = "data:text/json;charset=utf-8," + encodeURIComponent(JSON.stringify(packageData, null, 2));
@@ -1523,11 +1650,28 @@ function importProject(event) {
             document.getElementById('player-motion-style').value = parsed.motionStyle || 'subtle-zoom';
             document.getElementById('narration-voice-select').value = parsed.voice || 'Zephyr';
             document.getElementById('narrator-speed').value = parsed.speed || '1.0';
+            if (document.getElementById('scene-bg-mode')) {
+                document.getElementById('scene-bg-mode').value = parsed.backgroundMode || 'solid';
+            }
+            if (document.getElementById('scene-bg-color')) {
+                document.getElementById('scene-bg-color').value = parsed.backgroundColor || '#0b0d11';
+            }
+            appState.backgroundMode = parsed.backgroundMode || 'solid';
+            appState.backgroundColor = parsed.backgroundColor || '#0b0d11';
 
             appState.scenes = [];
             parsed.scenes.forEach(s => {
-                addScene(s.text, s.duration, { crop: s.crop, panelSuggestion: s.panelSuggestion });
+                addScene(s.text, s.duration, {
+                    crop: s.crop,
+                    panelSuggestion: s.panelSuggestion,
+                    pageIndex: s.pageIndex,
+                    animationStyle: s.animationStyle,
+                    backgroundMode: s.backgroundMode,
+                    backgroundColor: s.backgroundColor
+                });
             });
+
+            syncScenesToMedia(true);
 
             showToast("Project Restored", `Loaded ${appState.scenes.length} timelines into active state.`, "success");
             renderScriptList();
